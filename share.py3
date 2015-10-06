@@ -24,8 +24,8 @@ class Application(tk.Frame):
         logging.info('Opening application')
         thread = threading.Thread(target=self.initiateServer)
         thread.start()
-        app = tk.Frame.__init__(self, master)
-        self.createUI(app)
+        tk.Frame.__init__(self, master)
+        self.createUI(master)
         master.update_idletasks()
         w = master.winfo_screenwidth()
         h = master.winfo_screenheight()
@@ -34,13 +34,37 @@ class Application(tk.Frame):
         y = h/2 - size[1]/2
         master.geometry("%dx%d+%d+%d" % (size + (x, y)))
         master.title("Share with friends")
-        #self.delete()
     
+    def change_port(self):
+        self.port = sd.askinteger('Change port','What port would you like to use?')
+        if self.port:
+            c.execute ('UPDATE people SET port=? WHERE ID=1',  (self.port, ))
+            conn.commit()
+
+    def check_port(self,  port):
+        self.my_port = c.execute ('SELECT * FROM people WHERE ID=1')
+        self.info = self.my_port.fetchone()
+        if self.info:
+            port['text'] = self.info[3]
 
     def createUI(self,  app):
         """
         Create the UI, load DB values, and initialize some text
         """
+        self.menubar = tk.Menu(app)
+        
+        self.filemenu = tk.Menu(self.menubar, tearoff=0)
+        self.filemenu.add_command(label="My port",  command=self.change_port)
+        self.filemenu.add_separator()
+        self.filemenu.add_command(label="Exit", command=app.quit)
+        self.menubar.add_cascade(label="Config", menu=self.filemenu)
+        
+        self.helpmenu = tk.Menu(self.menubar, tearoff=0)
+        self.helpmenu.add_command(label="About")
+        self.menubar.add_cascade(label="Help",  menu=self.helpmenu)
+        
+        app.config(menu=self.menubar)
+        
         logging.info('Creating top part')
         self.text_my_ip = tk.Label(app, text="My ip")
         self.text_my_ip.grid(row=0,  sticky="W")
@@ -50,8 +74,10 @@ class Application(tk.Frame):
         self.text_my_port = tk.Label(app, text="My port")
         self.text_my_port.grid(row=1,  sticky="W")
         self.text_port= tk.Label(app, text="4000")
+        self.check_port(self.text_port)
         self.text_port.grid(row=1,  column=1,  sticky="W")
         
+
         self.text_friend_name = tk.Label(app, text="Friend name")
         self.text_friend_name.grid(row=0,  column=2, sticky="W")
         self.text_friendname = tk.Label(app, text="")
@@ -65,7 +91,7 @@ class Application(tk.Frame):
         logging.info('Creating bot part')
         self.list = tk.Listbox(app)
         self.list.grid(row=3,  columnspan=2)
-        self.showPeople(self.list)
+        self.show_people(self.list)
 
         self.list_files = ttk.Treeview(app,  columns=("File","Size"),   height=7)
         self.list_files.height = 20
@@ -93,8 +119,6 @@ class Application(tk.Frame):
         self.del_file= tk.Button(app,  text="del")
         self.del_file.grid(row=4, column=4, sticky="E")
 
-
-
     def download(self,  list,  list_files):
         #threading.Thread(target=self.initiateServer)
         self.person = list.get(list.curselection())
@@ -106,19 +130,25 @@ class Application(tk.Frame):
             self.info = self.find_server.fetchone()
             if self.info and self.selected:
                 logging.info('Downloading...')
-                s = socket.socket()
+                self.thread = threading.Thread(target=self.connect_client,  args=(self.info[2], self.info[3], self.selected))
+                self.thread.start()
 
-                s.connect((self.info[2],self.info[3]))
-                s.send(self.selected)
-                f = open(self.selected,'wb')
-                l = 1
-                while (l):
-                    l = s.recv(1024)
-                    f.write(l)
-                
-                f.close()
-                s.close()
-    
+    def connect_client(self,  ip,  port,  file):
+        '''
+        Function that is used in the thread to download the file from the server (friend)
+        '''
+        s = socket.socket()
+
+        s.connect((ip,  port))
+        s.send(str.encode(file) + str.encode('\n'))
+        f = open(file,'wt')
+        l = 1
+        while (l):
+            l = s.recv(1024)
+            f.write(l)
+        
+        f.close()
+        s.close()
     def show_files(self,  list_files):
         """
         Show the files in the Treeview when user have clicked in the name list
@@ -207,7 +237,7 @@ class Application(tk.Frame):
             self.local_ip_address = s.getsockname()[0]
             ip['text'] = self.local_ip_address
 
-    def showPeople(self, list):
+    def show_people(self, list):
         """
         List the people in the DB in the dialogbox
         """
@@ -228,8 +258,10 @@ class Application(tk.Frame):
             conn.commit()
             list.delete(self.cursor)    
     def initiateServer(self):
-        server = socket.socket()
-        server.bind(("localhost",4001))
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.findperson = c.execute("SELECT * FROM people WHERE ID=1")
+        self.info = self.findperson.fetchone()
+        server.bind(('',self.info[3]))
         server.listen(10)
         
         logging.info('Server initiated')
@@ -283,21 +315,19 @@ def dataEntry():
     findme = c.execute("SELECT * FROM people WHERE id=1" )
     info = findme.fetchone()
     if not info:
-        c.execute("INSERT INTO people (name, ip, port) VALUES ('myself','localhost','3333')")
+        c.execute("INSERT INTO people (name, ip, port) VALUES ('myself','localhost','4000')")
         conn.commit()
-            
-        
-def droptable():
-    c.execute("DROP TABLE people")
-    c.execute("DROP TABLE files")
-    conn.commit()
-
+    
+def on_close():
+    print()
+    
 def main():
     tableCreate()
     dataEntry()
 
     root = tk.Tk()
     app = Application(master=root)
+    root.protocol("WM_DELETE_WINDOW", on_close())
     app.mainloop()
     
     
