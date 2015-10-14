@@ -60,7 +60,7 @@ class Application(tk.Frame):
         self.menubar.add_cascade(label="Config", menu=self.filemenu)
         
         self.helpmenu = tk.Menu(self.menubar, tearoff=0)
-        self.helpmenu.add_command(label="About")
+        self.helpmenu.add_command(label="About",  command=self.about)
         self.menubar.add_cascade(label="Help",  menu=self.helpmenu)
         
         app.config(menu=self.menubar)
@@ -127,7 +127,9 @@ class Application(tk.Frame):
     
     def popup(self, event):
         self.menu_list.post(event.x_root, event.y_root)
-        
+    
+    def about(self):
+        ms.showinfo('About', 'Program developed by\n Marcus Renno\nContact at\n renno.marcus@gmail.com')
     def download(self, person,   list_files):
         if person == 'myself':
             return
@@ -155,7 +157,7 @@ class Application(tk.Frame):
             l = s.recv(1024)
             f.write(l)
         logging.info('Download completed')
-        ms.showwarning('Download completed', '{0} has been downloaded'.format(file))
+        ms.showinfo('Download completed', '{0} has been downloaded'.format(file))
         f.close()
         s.close()
     def show_files(self,  list_files):
