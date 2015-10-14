@@ -22,10 +22,10 @@ logging.basicConfig(format='%(levelname)s %(asctime)s %(funcName)s %(lineno)d %(
 class Application(tk.Frame):
     def __init__(self, master=None):
         logging.info('Opening application')
-        thread = threading.Thread(target=self.initiateServer)
+        thread = threading.Thread(target=self.initiate_server)
         thread.start()
         tk.Frame.__init__(self, master)
-        self.createUI(master)
+        self.create_ui(master)
         master.update_idletasks()
         w = master.winfo_screenwidth()
         h = master.winfo_screenheight()
@@ -47,7 +47,7 @@ class Application(tk.Frame):
         if self.info:
             port['text'] = self.info[3]
 
-    def createUI(self,  app):
+    def create_ui(self,  app):
         """
         Create the UI, load DB values, and initialize some text
         """
@@ -110,23 +110,30 @@ class Application(tk.Frame):
         self.bt_del_people = tk.Button(app,  text="del",  command= lambda: self.del_person(self.list))
         self.bt_del_people.grid(row=4, column=1, sticky="W")
         
-        self.bt_download= tk.Button(app,  text="download",  command= lambda: self.download(self.list,  self.list_files))
+        self.bt_download= tk.Button(app,  text="download",  command= lambda: self.download(self.text_friendname['text'],  self.list_files))
         self.bt_download.grid(row=4, column=2, sticky="W")
         
-        self.bt_add_file = tk.Button(app,  text="add",  command=lambda: self.add_file(self.list,  self.list_files))
+        self.bt_add_file = tk.Button(app,  text="add",  command=lambda: self.add_file(self.text_friendname['text'],  self.list_files))
         self.bt_add_file.grid(row=4, column=3, sticky="E")
         
         self.del_file= tk.Button(app,  text="del")
         self.del_file.grid(row=4, column=4, sticky="E")
+        
+        # create a popup menu for the list
+        self.menu_list = tk.Menu(self, tearoff=0)
+        self.menu_list.add_command(label="Refresh list",  command= self.refresh_file_list)
 
-    def download(self,  list,  list_files):
-        #threading.Thread(target=self.initiateServer)
-        self.person = list.get(list.curselection())
-        if self.person == 'myself':
+        self.list_files.bind('<Button-3>',  self.popup)
+    
+    def popup(self, event):
+        self.menu_list.post(event.x_root, event.y_root)
+        
+    def download(self, person,   list_files):
+        if person == 'myself':
             return
         elif list_files.focus():
             self.selected = list_files.item(list_files.focus())['values'][0]
-            self.find_server = c.execute("SELECT * FROM people WHERE name=?",  (self.person, ) )
+            self.find_server = c.execute("SELECT * FROM people WHERE name=?",  (person, ) )
             self.info = self.find_server.fetchone()
             if self.info and self.selected:
                 logging.info('Downloading...')
@@ -140,13 +147,15 @@ class Application(tk.Frame):
         s = socket.socket()
 
         s.connect((ip,  port))
+        s.send(str.encode('command: download\n'))
         s.send(str.encode(file) + str.encode('\n'))
-        f = open(file,'wt')
+        f = open(file,'wb')
         l = 1
         while (l):
             l = s.recv(1024)
             f.write(l)
-        
+        logging.info('Download completed')
+        ms.showwarning('Download completed', '{0} has been downloaded'.format(file))
         f.close()
         s.close()
     def show_files(self,  list_files):
@@ -206,16 +215,15 @@ class Application(tk.Frame):
             self.remove_person(list)
             
         
-    def add_file(self,  list,  list_files):
+    def add_file(self,  friend,  list_files):
         self.name =  fd.askopenfilename()
         if self.name:
             print(self.name)
             self.filename = self.name.split('/')[-1]
             c.execute("INSERT INTO files (name, location, size, person) VALUES (?, ?, 0, 'myself')",  (self.filename,  self.name))
             conn.commit()
-            self.person = list.get(list.curselection())
             
-            if self.person == 'myself':
+            if friend == 'myself':
                 list_files.insert('', 'end','',   values=(self.filename, 0 ))
         
     def add_ip(self, ip):
@@ -257,8 +265,31 @@ class Application(tk.Frame):
             c.execute("DELETE FROM people WHERE name=?",  (self.person, ))
             conn.commit()
             list.delete(self.cursor)    
-    def initiateServer(self):
+            
+    
+        
+    def refresh_file_list(self):
+        self.address = self.text_friendaddress['text'].split(':') 
+        self.person = self.text_friendname['text']
+        if not self.person == 'myself':
+            s = socket.socket()
+            ip = self.address[0]
+            port = int(self.address[1])
+            s.connect((ip, port))
+            s.send(str.encode('command: get_list\n'))
+            self.read_files = readlines(self,  s)
+            c.execute("DELETE FROM files WHERE person=?", (self.person, ))
+            for item in self.read_files:
+                if item:
+                    self.filename = item.split(': ')[1].split()[0]
+                    c.execute("INSERT INTO files (name, size, person) VALUES (?,?,?)", (self.filename, 0, self.person))
+            conn.commit()
+
+
+            s.close()
+    def initiate_server(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.findperson = c.execute("SELECT * FROM people WHERE ID=1")
         self.info = self.findperson.fetchone()
         server.bind(('',self.info[3]))
@@ -268,33 +299,45 @@ class Application(tk.Frame):
         while True:
             sc, address = server.accept()
             print(address)
-            self.readfile = readlines(self,  sc)
-            self.filename = next(self.readfile)
+            self.read_data = readlines(self,  sc)
+            self.command = next(self.read_data).split("command: ")[1]
             
-            self.findfile = c.execute("SELECT * FROM files WHERE name=?", (self.filename, ) )
-            self.file = self.findfile.fetchone()
-            if self.file:
-                logging.info('Sending file {0} to {1}'.format(self.filename, address))
-                self.f=open (self.file[2], "rb") 
+            if (self.command.split()[0] == "get_list"):
+                logging.info('Command get_list requested')
+                self.arg = self.command[-1]
+                for rows in c.execute("SELECT * FROM files WHERE person='myself'"):
+                    self.str = "file: {0} {1}\n".format(rows[2].split('/')[-1], self.arg)
+                    sc.send(str.encode(self.str))
+                
             
-                self.buffer = self.f.read(1024)
-                while (self.buffer):
-                    sc.send(self.buffer)
+            if (self.command.split()[0] == "download"):
+                logging.info('Command download requested')
+                self.filename = next(self.read_data)
+                logging.info('Looking for file {0}...'.format(self.filename))
+                self.findfile = c.execute("SELECT * FROM files WHERE name=?", (self.filename, ) )
+                self.file = self.findfile.fetchone()
+                if self.file:
+                    logging.info('Sending file {0} to {1}'.format(self.filename, address))
+                    self.f=open (self.file[2], "rb") 
+            
                     self.buffer = self.f.read(1024)
-
-
-                self.f.close()
+                    while (self.buffer):
+                        sc.send(self.buffer)
+                        self.buffer = self.f.read(1024)
+                    self.f.close()
                 
             sc.close()
 
         server.close()
 
-def readlines(self, sock, recv_buffer=4096, delim='\n'):
+def readlines(self, sock, recv_buffer=1024, delim='\n'):
     buffer = ''
     data = True
 
     while data:
         data = sock.recv(recv_buffer)
+        if not data:
+            break
         buffer = data.decode('utf-8')
         while buffer.find(delim) != -1:
             line, buffer = buffer.split('\n', 1)
@@ -303,7 +346,7 @@ def readlines(self, sock, recv_buffer=4096, delim='\n'):
         
     
 
-def tableCreate():
+def table_create():
     """
     Create the DB to save the data persistently
     """
@@ -311,23 +354,25 @@ def tableCreate():
     c.execute("CREATE TABLE IF NOT EXISTS files (id INTEGER, name TEXT, location TEXT, size INTEGER, person TEXT, FOREIGN KEY(person) REFERENCES people(name))")
     conn.commit()
 
-def dataEntry():
+def data_entry():
     findme = c.execute("SELECT * FROM people WHERE id=1" )
     info = findme.fetchone()
     if not info:
         c.execute("INSERT INTO people (name, ip, port) VALUES ('myself','localhost','4000')")
         conn.commit()
     
-def on_close():
-    print()
+def on_close(window):
+    window.destroy()
+    #TODO kill connections
     
 def main():
-    tableCreate()
-    dataEntry()
+    table_create()
+    data_entry()
 
     root = tk.Tk()
+    #root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
     app = Application(master=root)
-    root.protocol("WM_DELETE_WINDOW", on_close())
+    
     app.mainloop()
     
     
